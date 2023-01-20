@@ -108,13 +108,13 @@ class NeRFSystem(BaseSystem):
     
     """
     # aggregate outputs from different devices (DP)
-    def training_step_end(self, out):
+    def training_step_end(self, output):
         pass
     """
     
     """
     # aggregate outputs from different iterations
-    def training_epoch_end(self, out):
+    def training_epoch_end(self, output):
         pass
     """
     
@@ -139,7 +139,7 @@ class NeRFSystem(BaseSystem):
     
     """
     # aggregate outputs from different devices when using DP
-    def validation_step_end(self, out):
+    def validation_step_end(self, output):
         pass
     """
     

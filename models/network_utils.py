@@ -110,7 +110,7 @@ def sphere_init_tcnn_network(n_input_dims, n_output_dims, config, network):
     rank_zero_debug('Initialize tcnn MLP to approximately represent a sphere.')
     """
     from https://github.com/NVlabs/tiny-cuda-nn/issues/96
-    It's the weight matrices of each layer laid out in row-major order and then concatenated.
+    It's the weight matrices of each layer laid output in row-major order and then concatenated.
     Notably: inputs and output dimensions are padded to multiples of 8 (CutlassMLP) or 16 (FullyFusedMLP).
     The padded input dimensions get a constant value of 1.0,
     whereas the padded output dimensions are simply ignored,

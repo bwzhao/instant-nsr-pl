@@ -127,13 +127,13 @@ class NeuSSystem(BaseSystem):
     
     """
     # aggregate outputs from different devices (DP)
-    def training_step_end(self, out):
+    def training_step_end(self, output):
         pass
     """
     
     """
     # aggregate outputs from different iterations
-    def training_epoch_end(self, out):
+    def training_epoch_end(self, output):
         pass
     """
     
@@ -158,7 +158,7 @@ class NeuSSystem(BaseSystem):
     
     """
     # aggregate outputs from different devices when using DP
-    def validation_step_end(self, out):
+    def validation_step_end(self, output):
         pass
     """
     
@@ -178,53 +178,81 @@ class NeuSSystem(BaseSystem):
             self.log('val/psnr', psnr, prog_bar=True, rank_zero_only=True)         
 
     def test_step(self, batch, batch_idx):
-        out = self(batch)
-        psnr = self.criterions['psnr'](out['comp_rgb'], batch['rgb'])
-        W, H = self.config.dataset.img_wh
-        img = out['comp_rgb'].view(H, W, 3)
-        depth = out['depth'].view(H, W)
-        opacity = out['opacity'].view(H, W)
-        self.save_image_grid(f"it{self.global_step}-test/{batch['index'][0].item()}.png", [
-            {'type': 'rgb', 'img': batch['rgb'].view(H, W, 3), 'kwargs': {'data_format': 'HWC'}},
-            {'type': 'rgb', 'img': img, 'kwargs': {'data_format': 'HWC'}},
-            {'type': 'grayscale', 'img': depth, 'kwargs': {}},
-            {'type': 'grayscale', 'img': opacity, 'kwargs': {'cmap': None, 'data_range': (0, 1)}}
-        ])
-        return {
-            'psnr': psnr,
-            'index': batch['index']
-        }      
+        # output = self(batch)
+        # psnr = self.criterions['psnr'](output['comp_rgb'], batch['rgb'])
+        # W, H = self.config.dataset.img_wh
+        # img = output['comp_rgb'].view(H, W, 3)
+        # depth = output['depth'].view(H, W)
+        # opacity = output['opacity'].view(H, W)
+        # self.save_image_grid(f"it{self.global_step}-test/{batch['index'][0].item()}.png", [
+        #     {'type': 'rgb', 'img': batch['rgb'].view(H, W, 3), 'kwargs': {'data_format': 'HWC'}},
+        #     {'type': 'rgb', 'img': img, 'kwargs': {'data_format': 'HWC'}},
+        #     {'type': 'grayscale', 'img': depth, 'kwargs': {}},
+        #     {'type': 'grayscale', 'img': opacity, 'kwargs': {'cmap': None, 'data_range': (0, 1)}}
+        # ])
+        # return {
+        #     'psnr': psnr,
+        #     'index': batch['index']
+        # }
+        pass
     
     def test_epoch_end(self, out):
         """
         Synchronize devices.
         Generate image sequence using test outputs.
         """
+
+
         out = self.all_gather(out)
         if self.trainer.is_global_zero:
-            out_set = {}
-            for step_out in out:
-                # DP
-                if step_out['index'].ndim == 1:
-                    out_set[step_out['index'].item()] = {'psnr': step_out['psnr']}
-                # DDP
-                else:
-                    for oi, index in enumerate(step_out['index']):
-                        out_set[index[0].item()] = {'psnr': step_out['psnr'][oi]}
-            psnr = torch.mean(torch.stack([o['psnr'] for o in out_set.values()]))
-            self.log('test/psnr', psnr, prog_bar=True, rank_zero_only=True)    
-
-            self.save_img_sequence(
-                f"it{self.global_step}-test",
-                f"it{self.global_step}-test",
-                '(\d+)\.png',
-                save_format='mp4',
-                fps=30
-            )
+            #
+            # out_set = {}
+            # for step_out in output:
+            #     # DP
+            #     if step_out['index'].ndim == 1:
+            #         out_set[step_out['index'].item()] = {'psnr': step_out['psnr']}
+            #     # DDP
+            #     else:
+            #         for oi, index in enumerate(step_out['index']):
+            #             out_set[index[0].item()] = {'psnr': step_out['psnr'][oi]}
+            # psnr = torch.mean(torch.stack([o['psnr'] for o in out_set.values()]))
+            # self.log('test/psnr', psnr, prog_bar=True, rank_zero_only=True)
+            #
+            # self.save_img_sequence(
+            #     f"it{self.global_step}-test",
+            #     f"it{self.global_step}-test",
+            #     '(\d+)\.png',
+            #     save_format='mp4',
+            #     fps=30
+            # )
             
             mesh = self.model.isosurface()
+            x_scale = max(abs(mesh['v_pos'][:, 0].min()), mesh['v_pos'][:, 0].max())
+            y_scale = max(abs(mesh['v_pos'][:, 1].min()), mesh['v_pos'][:, 1].max())
+            z_scale = max(abs(mesh['v_pos'][:, 2].min()), mesh['v_pos'][:, 2].max())
+
             self.save_mesh(
                 f"it{self.global_step}-{self.config.model.geometry.isosurface.method}{self.config.model.geometry.isosurface.resolution}.obj",
                 mesh['v_pos'],
                 mesh['t_pos_idx'],
             )
+
+            import numpy as np
+            import os
+
+            # Read sdf values from the tet mesh generated by nvdiffrec algorithms
+            grid_res = 128
+            tets = np.load(os.path.dirname(__file__) + '/../sample_tets/{}_tets.npz'.format(grid_res))
+            vertices = tets['vertices'] * np.array([x_scale, y_scale, z_scale]) * 1.1 * 2
+            indices = tets['indices']
+
+            verts = torch.tensor(vertices, dtype=torch.float32, device='cuda')
+            sdf = self.model.geometry(verts, with_grad=False, with_feature=False)
+
+            torch.save(sdf, os.path.dirname(__file__) + '/../output/{}_sdf.pt'.format(grid_res))
+            np.savez_compressed(os.path.dirname(__file__) + '/../output/{}_tets.npz'.format(grid_res),
+                                vertices=vertices,
+                                indices=indices)
+            print("Saved scaled tet mesh!", x_scale, y_scale, z_scale)
+            print("Saved sdf for tet mesh!")
+
